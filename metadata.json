@@ -1,0 +1,13 @@
+{
+  "name": "Remix: Remix: Remix: AI OS - Virtual Companion",
+  "description": "An iOS-inspired virtual operating system featuring a WeChat-like chat interface with AI companions, persona management, and customizable settings.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "AI Chat",
+    "Virtual OS",
+    "Persona Management"
+  ]
+}

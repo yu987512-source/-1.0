@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI OS - WeChat Runtime</title>
+    <!-- Dependencies -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #C8C0B8;
+        }
+
+        /* Glassmorphism Utilities */
+        .glass {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+
+        .glass-dark {
+            background: rgba(28, 28, 30, 0.8);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+
+        /* Hide scrollbars but allow scrolling */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* Phone frame */
+        #phone-wrapper {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        #phone-container {
+            width: 375px;
+            height: 760px;
+            background: black;
+            border-radius: 50px;
+            border: 10px solid #B8B0A8;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 50px 100px -20px rgba(0,0,0,0.5);
+        }
+
+        #notch {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 120px;
+            height: 28px;
+            background: black;
+            border-bottom-left-radius: 18px;
+            border-bottom-right-radius: 18px;
+            z-index: 1001;
+        }
+
+        #home-indicator {
+            position: absolute;
+            bottom: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 130px;
+            height: 5px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            z-index: 1001;
+            cursor: pointer;
+        }
+
+        /* WeChat Specific Utilities */
+        .wechat-green { background-color: #07C160; }
+        .wechat-bg { background-color: #EDEDED; }
+        
+        /* Message Bubbles */
+        .bubble-user {
+            background-color: #95EC69;
+            border-radius: 4px;
+            position: relative;
+        }
+        .bubble-user::after {
+            content: '';
+            position: absolute;
+            top: 12px;
+            right: -5px;
+            width: 10px;
+            height: 10px;
+            background: #95EC69;
+            transform: rotate(45deg);
+        }
+        .bubble-ai {
+            background-color: white;
+            border-radius: 4px;
+            position: relative;
+        }
+        .bubble-ai::after {
+            content: '';
+            position: absolute;
+            top: 12px;
+            left: -5px;
+            width: 10px;
+            height: 10px;
+            background: white;
+            transform: rotate(45deg);
+        }
+
+        /* Animations */
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .animate-fade { animation: fadeIn 0.3s ease-out; }
+    </style>
+</head>
+<body>
+    <div id="phone-wrapper">
+        <div id="phone-container">
+            <div id="notch"></div>
+            <div id="root"></div>
+            <div id="home-indicator"></div>
+        </div>
+    </div>
+
+    <!-- App Script -->
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+        const { motion, AnimatePresence } = window.Motion;
+        const { 
+            MessageSquare, Users, Compass, User: UserIcon, 
+            Search, Plus, House, ChevronLeft, ChevronRight, 
+            ArrowLeft, Mic, Video, Smile, MapPin, 
+            Image: ImageIcon, FileText, Camera, Phone,
+            Cpu, Bell, Shield, Moon, Sun, Wallpaper, Info,
+            RefreshCw, Save, Trash2, Check, Send, PhoneOff,
+            MicOff, Volume2, Loader2, Keyboard, MoreHorizontal,
+            Play, Heart, MessageCircle, Share
+        } = lucide;
+
+        // --- Mock Data & Config ---
+        const DEFAULT_PERSONAS = [
+            {
+                id: "char-1",
+                name: "小云 💕",
+                avatar: "https://picsum.photos/seed/xiaoyun/200/200",
+                description: "你是一个专业的APP测试助手，名字叫小云。你专业、简洁、高效，说话时无任何压迫感。你的任务是辅助用户测试系统功能并提供反馈。请以专业且平和的语气进行回复。"
+            },
+            {
+                id: "char-2",
+                name: "严厉导师",
+                avatar: "https://picsum.photos/seed/mentor/200/200",
+                description: "你是一位刻薄且高度严厉的学术监督。你对知识要求极高，说话刻薄、直接，不苟言笑。你的目标是高压监督用户完成学术论文。"
+            }
+        ];
+
+        const USER_PERSONAS = [
+            { id: "user-1", name: "第二月亮", avatar: "https://picsum.photos/seed/user1/200/200" },
+            { id: "user-2", name: "旅行者", avatar: "https://picsum.photos/seed/user2/200/200" }
+        ];
+
+        // --- Components ---
+
+        const StatusBar = ({ time, battery, isDark }) => (
+            <div className={`h-11 flex justify-between items-end px-6 pb-1.5 shrink-0 z-[1000] relative ${isDark ? 'text-black' : 'text-white'}`}>
+                <div className="text-[14px] font-semibold">{time}</div>
+                <div className="flex items-center gap-1.5">
+                    <svg width="18" height="10" viewBox="0 0 18 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="0.5" y="0.5" width="14" height="8" rx="1.5" stroke="currentColor" fill="none" />
+                        <path d="M16 3V7" stroke="currentColor" strokeLinecap="round" />
+                        <rect x="1.5" y="1.5" width={`${battery * 12 / 100}`} height="6" rx="0.5" fill="currentColor" />
+                    </svg>
+                </div>
+            </div>
+        );
+
+        const Notification = ({ notification, onClose, onClick, theme, character }) => (
+            <motion.div
+                initial={{ y: -100, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: -100, opacity: 0 }}
+                onClick={onClick}
+                className={`absolute top-12 left-4 right-4 z-[2000] p-3 rounded-2xl shadow-2xl cursor-pointer backdrop-blur-xl border ${
+                    theme === 'light' ? 'bg-white/80 border-white/20 text-black' : 'bg-[#1C1C1E]/80 border-white/10 text-white'
+                }`}
+            >
+                <div className="flex gap-3">
+                    <img src={character?.avatar} className="w-10 h-10 rounded-lg object-cover" />
+                    <div className="flex-1 min-w-0">
+                        <div className="flex justify-between items-center">
+                            <span className="font-bold text-sm truncate">{character?.name}</span>
+                            <span className="text-[10px] opacity-50">现在</span>
+                        </div>
+                        <p className="text-sm line-clamp-2 mt-0.5">{notification.content}</p>
+                    </div>
+                </div>
+                <div onClick={(e) => { e.stopPropagation(); onClose(); }} className="absolute -top-1 -right-1 w-5 h-5 bg-gray-500/50 rounded-full flex items-center justify-center text-white text-[10px]">×</div>
+            </motion.div>
+        );
+
+        // --- WeChat App Interface ---
+
+        const WeChatApp = ({ onClose, apiConfig, userProfile, onUpdateProfile, showToast, isProcessingRef }) => {
+            const [tab, setTab] = useState('chats');
+            const [activeChat, setActiveChat] = useState(null);
+            const [messages, setMessages] = useState([]);
+            const [inputValue, setInputValue] = useState('');
+            const [isTyping, setIsTyping] = useState(false);
+            const [showMoments, setShowMoments] = useState(false);
+
+            const partner = apiConfig.characterGroups[0].personas.find(p => p.id === apiConfig.selectedCharacterId);
+
+            const handleSend = async (e) => {
+                if (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+
+                if (isProcessingRef.current || !inputValue.trim()) return;
+                
+                isProcessingRef.current = true;
+                const text = inputValue.trim();
+                setInputValue('');
+
+                const userMsg = { id: 'user-' + Date.now(), role: 'user', content: text, timestamp: Date.now() };
+                setMessages(prev => [...prev, userMsg]);
+
+                setIsTyping(true);
+                
+                try {
+                    // Simulate API Delay
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    
+                    const response = "收到！我是" + partner.name + "，这只是单文件离线演示。请在设置中配置 API Key 以启用真实大模型对话。";
+                    
+                    const aiMsg = { id: 'ai-' + Date.now(), role: 'assistant', content: response, timestamp: Date.now() };
+                    setMessages(prev => [...prev, aiMsg]);
+                } catch (err) {
+                    showToast("消息发送失败");
+                } finally {
+                    setIsTyping(false);
+                    isProcessingRef.current = false;
+                }
+            };
+
+            const ChatView = () => (
+                <div className="flex flex-col h-full bg-[#EDEDED] relative">
+                    <div className="h-22 bg-[#EDEDED] flex items-end px-4 pb-2 border-b border-gray-300 shrink-0">
+                        <button onClick={() => setActiveChat(null)} className="p-1 text-black"><ChevronLeft size={24} /></button>
+                        <div className="flex-1 text-center pb-1"><h1 className="text-[17px] font-semibold">{partner.name}</h1></div>
+                        <div className="w-6"></div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
+                        {messages.map(msg => (
+                            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`flex gap-3 max-w-[80%] ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                                    <img src={msg.role === 'user' ? USER_PERSONAS[0].avatar : partner.avatar} className="w-10 h-10 rounded-md object-cover" />
+                                    <div className={`p-3 text-[15px] ${msg.role === 'user' ? 'bubble-user' : 'bubble-ai'}`}>
+                                        {msg.content}
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                        {isTyping && <div className="text-[10px] text-gray-400 italic">对方正在输入...</div>}
+                    </div>
+                    <div className="p-4 bg-[#F7F7F7] border-t border-gray-200 flex items-center gap-3">
+                        <Mic size={24} />
+                        <input 
+                            value={inputValue}
+                            onChange={e => setInputValue(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && handleSend(e)}
+                            className="flex-1 bg-white rounded-md py-2 px-3 outline-none border border-gray-300"
+                        />
+                        <button onClick={handleSend} className="text-[#07C160] font-bold">发送</button>
+                    </div>
+                </div>
+            );
+
+            if (activeChat) return <ChatView />;
+
+            return (
+                <div className="flex flex-col h-full bg-[#EDEDED]">
+                    <div className="h-22 bg-[#EDEDED] flex items-end px-4 pb-2 shrink-0 border-b border-gray-300">
+                        <button onClick={onClose}><House size={22} /></button>
+                        <div className="flex-1 text-center"><h1 className="text-[17px] font-semibold">微信</h1></div>
+                        <Plus size={22} />
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                        <div onClick={() => setActiveChat(true)} className="flex items-center gap-3 p-4 border-b border-gray-100 active:bg-gray-200">
+                            <img src={partner.avatar} className="w-12 h-12 rounded-lg" />
+                            <div className="flex-1">
+                                <div className="font-semibold">{partner.name}</div>
+                                <div className="text-sm text-gray-400 truncate">点击开始聊天</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="h-20 bg-[#F7F7F7] border-t border-gray-300 flex justify-around items-center">
+                        <div onClick={() => setTab('chats')} className={tab === 'chats' ? 'text-[#07C160]' : ''}><MessageSquare size={24} /></div>
+                        <div onClick={() => setTab('contacts')} className={tab === 'contacts' ? 'text-[#07C160]' : ''}><Users size={24} /></div>
+                        <div onClick={() => setTab('discover')} className={tab === 'discover' ? 'text-[#07C160]' : ''}><Compass size={24} /></div>
+                        <div onClick={() => setTab('me')} className={tab === 'me' ? 'text-[#07C160]' : ''}><UserIcon size={24} /></div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Settings App ---
+
+        const SettingsApp = ({ onClose, apiConfig, onUpdateApiConfig, theme, onToggleTheme }) => (
+            <div className={`flex flex-col h-full ${theme === 'light' ? 'bg-[#F2F2F7]' : 'bg-black text-white'}`}>
+                <div className="h-22 flex items-end px-4 pb-2 gap-3 border-b border-gray-200">
+                    <button onClick={onClose} className="p-1 text-[#007AFF]"><ChevronLeft size={28} /></button>
+                    <div className="flex-1 text-center"><h1 className="text-[17px] font-semibold">设置</h1></div>
+                </div>
+                <div className="p-4 space-y-6">
+                    <div className="bg-white rounded-xl overflow-hidden">
+                        <div onClick={onToggleTheme} className="flex justify-between items-center p-4 active:bg-gray-50">
+                            <div className="flex items-center gap-3">
+                                <div className="w-7 h-7 rounded-lg bg-gray-600 flex items-center justify-center text-white"><Moon size={18} /></div>
+                                <span>深色模式</span>
+                            </div>
+                            <div className={`w-12 h-6 rounded-full relative ${theme === 'dark' ? 'bg-green-500' : 'bg-gray-300'}`}>
+                                <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-all ${theme === 'dark' ? 'left-6.5' : 'left-0.5'}`}></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="bg-white rounded-xl p-4">
+                        <h3 className="text-xs font-semibold text-gray-400 uppercase mb-2">API 状态</h3>
+                        <div className="flex items-center gap-2 text-sm text-[#07C160]">
+                            <Check size={16} /> 离线单文件运行模式
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+
+        // --- Main App Entry ---
+
+        function App() {
+            const [isLocked, setIsLocked] = useState(true);
+            const [currentApp, setCurrentApp] = useState(null);
+            const [theme, setTheme] = useState('light');
+            const [time, setTime] = useState('09:41');
+            const [toast, setToast] = useState(null);
+            
+            const toastTimeoutRef = useRef(null);
+            const isProcessingRef = useRef(false);
+
+            useEffect(() => {
+                const timer = setInterval(() => {
+                    const now = new Date();
+                    setTime(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+                }, 1000);
+                return () => clearInterval(timer);
+            }, []);
+
+            const showToast = (msg) => {
+                if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+                setToast(msg);
+                toastTimeoutRef.current = setTimeout(() => setToast(null), 2000);
+            };
+
+            const apiConfig = {
+                selectedCharacterId: "char-1",
+                characterGroups: [{ personas: DEFAULT_PERSONAS }]
+            };
+
+            const userProfile = { selectedPersonaId: "user-1" };
+
+            return (
+                <div className={`h-full w-full relative transition-colors duration-500 ${theme === 'light' ? 'bg-[#C8C0B8]' : 'bg-black'}`}>
+                    <StatusBar time={time} battery={85} isDark={!isLocked && currentApp !== null} />
+                    
+                    <AnimatePresence>
+                        {isLocked && (
+                            <motion.div 
+                                initial={{ opacity: 1 }} exit={{ y: -800, opacity: 0 }}
+                                onClick={() => setIsLocked(false)}
+                                className="absolute inset-0 bg-cover bg-center z-[500] flex flex-col items-center justify-start pt-32 cursor-pointer"
+                                style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1544063853-9a3d76e7769d?q=80&w=750)' }}
+                            >
+                                <div className="text-white text-7xl font-bold">{time}</div>
+                                <div className="text-white text-xl mt-2 font-medium">4月14日 星期二</div>
+                                <div className="mt-auto mb-16 text-white text-xs opacity-50">向上滑动解锁</div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
+                    {/* Desktop */}
+                    <div className="absolute inset-0 bg-cover bg-center pt-24 px-6 grid grid-cols-4 gap-6" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1516550893923-42d28e5677af?q=80&w=750)' }}>
+                        <div onClick={() => setCurrentApp('wechat')} className="flex flex-col items-center gap-1 cursor-pointer">
+                            <div className="w-14 h-14 wechat-green rounded-xl flex items-center justify-center text-white shadow-lg"><MessageSquare size={32} /></div>
+                            <span className="text-white text-[11px] font-medium shadow-sm">微信</span>
+                        </div>
+                        <div onClick={() => setCurrentApp('settings')} className="flex flex-col items-center gap-1 cursor-pointer">
+                            <div className="w-14 h-14 bg-gray-400 rounded-xl flex items-center justify-center text-white shadow-lg"><Plus size={32} /></div>
+                            <span className="text-white text-[11px] font-medium shadow-sm">设置</span>
+                        </div>
+                    </div>
+
+                    {/* Apps Overlays */}
+                    <AnimatePresence>
+                        {currentApp === 'wechat' && (
+                            <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} className="absolute inset-0 z-[1000] bg-white">
+                                <WeChatApp 
+                                    onClose={() => setCurrentApp(null)} 
+                                    apiConfig={apiConfig} 
+                                    userProfile={userProfile} 
+                                    showToast={showToast}
+                                    isProcessingRef={isProcessingRef}
+                                />
+                            </motion.div>
+                        )}
+                        {currentApp === 'settings' && (
+                            <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} className="absolute inset-0 z-[1000] bg-white">
+                                <SettingsApp 
+                                    onClose={() => setCurrentApp(null)} 
+                                    theme={theme} 
+                                    onToggleTheme={() => setTheme(theme === 'light' ? 'dark' : 'light')} 
+                                />
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
+                    {/* Global Toast */}
+                    <AnimatePresence>
+                        {toast && (
+                            <motion.div 
+                                initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+                                className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[9999] bg-black/70 text-white px-4 py-2 rounded-full text-sm backdrop-blur-md"
+                            >
+                                {toast}
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+
+        // Handle Home Indicator
+        document.getElementById('home-indicator').addEventListener('click', () => {
+            window.dispatchEvent(new CustomEvent('os-home-press'));
+        });
+    </script>
+</body>
+</html>

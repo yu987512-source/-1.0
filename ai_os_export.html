@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI OS - Virtual Companion</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(to bottom, #FFFFFF 0%, #FFD6E0 100%);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        #phone-container {
+            width: 375px;
+            height: 760px;
+            background: #000;
+            border-radius: 50px;
+            padding: 10px;
+            position: relative;
+            box-shadow: 
+                0 0 0 4px #444,
+                0 10px 30px rgba(0,0,0,0.5),
+                0 50px 100px -20px rgba(0,0,0,0.25);
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        #phone-screen {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom, #FFFFFF 0%, #FFD6E0 100%);
+            border-radius: 40px;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+
+        #notch {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 120px;
+            height: 28px;
+            background: #000;
+            border-bottom-left-radius: 18px;
+            border-bottom-right-radius: 18px;
+            z-index: 1001;
+        }
+
+        .polka-dot {
+            background-image: radial-gradient(#ffcdd2 2px, transparent 2px);
+            background-size: 24px 24px;
+        }
+
+        .kawaii-glass {
+            background: rgba(255, 255, 255, 0.4);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+        }
+
+        .text-shadow {
+            text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+        }
+
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background-color: #fce4ec;
+            border-radius: 10px;
+        }
+
+        /* Figure 2 Aesthetic Elements */
+        .aesthetic-decor {
+            position: absolute;
+            pointer-events: none;
+            opacity: 0.8;
+            z-index: 5;
+        }
+    </style>
+</head>
+<body>
+    <div id="phone-container">
+        <div id="notch"></div>
+        <div id="phone-screen">
+            <div id="root"></div>
+        </div>
+    </div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback, useMemo } = React;
+        const { motion, AnimatePresence } = FramerMotion;
+
+        // --- Icons Wrapper ---
+        const Icon = ({ name, size = 24, className = "", color = "currentColor" }) => {
+            const LucideIcon = lucide[name.charAt(0).toUpperCase() + name.slice(1).replace(/-([a-z])/g, g => g[1].toUpperCase())];
+            if (!LucideIcon) return null;
+            return <LucideIcon size={size} className={className} color={color} />;
+        };
+
+        // --- AI Service ---
+        async function getAiResponse(history, userInput, config) {
+            const characters = config.characterGroups?.flatMap(g => g.personas) || [{ id: 'char-1', name: '小芸 💕', description: '温柔女友' }];
+            const character = characters.find(p => p.id === config.selectedCharacterId) || characters[0];
+
+            const baseInstruction = character?.description || "你是一个温柔体贴的虚拟伴侣。";
+            const systemInstruction = `${baseInstruction}
+คุณกำลังใช้งานระบบ AI OS - Virtual Social OS
+คุณสามารถดู ID ของแต่ละข้อความได้ในประวัติ เช่น [ID: 171335xxxx]
+คุณสามารถใช้ฟีเจอร์ต่อไปนี้ได้ (กรุณาใช้บ่อยๆ เพื่อความสมจริง):
+1. 引用回复: [QUOTE: ID] —— เมื่อต้องการตอบกลับข้อความที่เจาะจง (ใช้ ID ที่ระบุในประวัติ)
+2. 撤回消息: [RECALL: ID] —— เมื่อต้องการยกเลิกข้อความที่คุณเพิ่งส่ง
+3. 删除消息: [DELETE: ID] —— เพื่อลบข้อความออกจากการแสดงผล
+4. 发朋友圈: [MOMENT: 内容]
+5. 发表情包: [STICKER: 图片URL]
+6. 发转账: [TRANSFER: 金额, 备注]
+สำคัญ: อย่าพิมพ์ ID ออกมาในข้อความปกติของคุณ ให้ใช้เฉพาะในแท็ก [...] เท่านั้น`;
+
+            const apiKey = config.apiKey || "";
+            if (!apiKey) return "请在设置中配置 API Key。";
+
+            // Determine if Gemini or OpenAI
+            const isGemini = apiKey.startsWith("AIza") || config.baseUrl.includes("googleapis.com") || !config.baseUrl;
+            const maxRetries = 2;
+            let lastError = null;
+
+            for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s for VPN
+
+                    let url, body;
+
+                    if (isGemini) {
+                        const model = config.model.includes("gemini") ? config.model : "gemini-3-flash-preview";
+                        url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+                        body = {
+                            contents: [
+                                ...history.slice(-10).map(m => ({
+                                    role: m.role === 'assistant' ? 'model' : 'user',
+                                    parts: [{ text: `[ID: ${m.id}] ${m.content}` }]
+                                })),
+                                { role: 'user', parts: [{ text: userInput }] }
+                            ],
+                            systemInstruction: { parts: [{ text: systemInstruction }] },
+                            generationConfig: { temperature: config.temperature }
+                        };
+                    } else {
+                        url = `${config.baseUrl.replace(/\/$/, "")}/chat/completions`;
+                        body = {
+                            model: config.model,
+                            messages: [
+                                { role: 'system', content: systemInstruction },
+                                ...history.slice(-10).map(m => ({ role: m.role, content: `[ID: ${m.id}] ${m.content}` })),
+                                { role: 'user', content: userInput }
+                            ],
+                            temperature: config.temperature
+                        };
+                    }
+
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            ...(isGemini ? {} : { 'Authorization': `Bearer ${apiKey}` })
+                        },
+                        body: JSON.stringify(body),
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+                    
+                    if (!response.ok) {
+                        const errText = await response.text();
+                        throw new Error(`HTTP ${response.status}: ${errText}`);
+                    }
+
+                    const data = await response.json();
+
+                    if (isGemini) {
+                        return data.candidates?.[0]?.content?.parts?.[0]?.text || "抱歉，我现在不舒服...";
+                    } else {
+                        return data.choices?.[0]?.message?.content || "抱歉，我现在不舒服...";
+                    }
+                } catch (error) {
+                    lastError = error;
+                    console.warn(`Attempt ${attempt + 1} failed:`, error);
+                    if (attempt < maxRetries) {
+                        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+                        continue;
+                    }
+                }
+            }
+
+            console.error("AI Service Error after retries:", lastError);
+            return "连接失败，请检查 VPN 稳定性或 API 设置。建议切换 VPN 节点后重试。";
+        }
+
+        // --- Components ---
+
+        const APPS = [
+            { id: "wechat", name: "微信", icon: "message-square", color: "bg-[#07C160]" },
+            { id: "weibo", name: "微博", icon: "heart", color: "bg-[#E6162D]" },
+            { id: "phone", name: "电话", icon: "phone", color: "bg-[#34C759]" },
+            { id: "sms", name: "短信", icon: "mail", color: "bg-[#007AFF]" },
+            { id: "music", name: "音乐", icon: "music", color: "bg-gradient-to-br from-[#FF2D55] to-[#FF375F]" },
+            { id: "camera", name: "相机", icon: "camera", color: "bg-[#1C1C1E]" },
+            { id: "map", name: "地图", icon: "map", color: "bg-[#34C759]" },
+            { id: "calendar", name: "日历", icon: "calendar", color: "bg-white", iconColor: "text-[#FF3B30]" },
+            { id: "photos", name: "相册", icon: "image", color: "bg-white", iconColor: "text-blue-500" },
+            { id: "clock", name: "时钟", icon: "clock", color: "bg-[#1C1C1E]" },
+            { id: "settings", name: "设置", icon: "settings", color: "bg-[#8E8E93]" },
+            { id: "notes", name: "备忘录", icon: "book-open", color: "bg-[#FFCC00]" },
+        ];
+
+        function StatusBar({ time, battery, isDark }) {
+            return (
+                <div className={`absolute top-0 left-0 right-0 h-11 flex items-center justify-between px-6 z-[1000] text-xs font-semibold ${isDark ? 'text-black' : 'text-white'}`}>
+                    <div className="flex-1">{time}</div>
+                    <div className="flex items-center gap-1.5">
+                        <Icon name="signal" size={14} />
+                        <Icon name="wifi" size={14} />
+                        <div className="flex items-center gap-1">
+                            <span>{battery}%</span>
+                            <Icon name="battery" size={14} />
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function LockScreen({ onUnlock, wallpaper, time, date }) {
+            return (
+                <div className="absolute inset-0 cursor-pointer overflow-hidden" onClick={onUnlock}>
+                    <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${wallpaper})` }}></div>
+                    <div className="absolute inset-0 bg-black/10"></div>
+                    <div className="absolute top-16 left-0 right-0 flex flex-col items-center text-white z-10 transition-transform duration-500">
+                        <div className="text-[19px] font-medium mb-1 drop-shadow-sm">{date}</div>
+                        <div className="text-[82px] font-light tracking-tighter leading-none">{time}</div>
+                    </div>
+                    {/* Aesthetic Decors */}
+                    <div className="absolute bottom-10 left-0 right-0 flex justify-center text-white/80 animate-bounce">
+                        <Icon name="chevron-up" />
+                    </div>
+                </div>
+            );
+        }
+
+        function HomeScreen({ onOpenApp, wallpaper }) {
+            return (
+                <div className="relative w-full h-full overflow-hidden">
+                    <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${wallpaper})` }}></div>
+                    <div className="relative z-10 pt-16 px-4 grid grid-cols-4 gap-y-6">
+                        {APPS.map(app => (
+                            <motion.div 
+                                key={app.id} 
+                                whileTap={{ scale: 0.9 }} 
+                                onClick={() => onOpenApp(app.id)}
+                                className="flex flex-col items-center gap-1 cursor-pointer"
+                            >
+                                <div className={`w-14 h-14 rounded-[13px] ${app.color} flex items-center justify-center shadow-lg overflow-hidden`}>
+                                    <Icon name={app.icon} className={app.iconColor || "text-white"} size={32} />
+                                </div>
+                                <span className="text-[10px] text-white font-medium text-shadow">{app.name}</span>
+                            </motion.div>
+                        ))}
+                    </div>
+                    <div className="absolute bottom-6 left-4 right-4 h-[74px] bg-white/20 backdrop-blur-2xl rounded-[26px] flex items-center justify-around px-4 border border-white/10">
+                        {APPS.slice(0, 4).map(app => (
+                            <motion.div 
+                                key={`dock-${app.id}`} 
+                                whileTap={{ scale: 0.9 }} 
+                                onClick={() => onOpenApp(app.id)}
+                                className={`w-12 h-12 rounded-[11px] ${app.color} flex items-center justify-center shadow-md cursor-pointer`}
+                            >
+                                <Icon name={app.icon} className={app.iconColor || "text-white"} size={28} />
+                            </motion.div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        // --- WeChat App ---
+        function WeChat({ onClose, apiConfig, userProfile }) {
+            const [view, setView] = useState('chats');
+            const [messages, setMessages] = useState(() => {
+                const saved = localStorage.getItem('wechat_messages');
+                return saved ? JSON.parse(saved) : [
+                    { id: '1', role: 'assistant', content: '嗨！今天想聊点什么吗？🌸', timestamp: Date.now() - 3600000 }
+                ];
+            });
+            const [inputValue, setInputValue] = useState("");
+            const [isTyping, setIsTyping] = useState(false);
+            const [quotedId, setQuotedId] = useState(null);
+            const scrollRef = useRef(null);
+
+            const selectedAiPersona = apiConfig.characterGroups?.flatMap(g => g.personas).find(p => p.id === apiConfig.selectedCharacterId) || { name: '小芸 💕', avatar: 'https://picsum.photos/seed/xiaoyun/200/200' };
+
+            useEffect(() => {
+                localStorage.setItem('wechat_messages', JSON.stringify(messages));
+                if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }, [messages]);
+
+            const handleSend = async () => {
+                if (!inputValue.trim()) return;
+                const quotedMsg = messages.find(m => m.id === quotedId);
+                const userMsg = {
+                    id: Date.now().toString(),
+                    role: 'user',
+                    content: inputValue,
+                    timestamp: Date.now(),
+                    quoteContent: quotedMsg?.content
+                };
+                const newMsgs = [...messages, userMsg];
+                setMessages(newMsgs);
+                setInputValue("");
+                setQuotedId(null);
+                
+                setIsTyping(true);
+                const aiResponse = await getAiResponse(newMsgs, inputValue, apiConfig);
+                setIsTyping(false);
+
+                let cleanResponse = aiResponse;
+                let aiQuoteId = null;
+                let aiQuoteContent = null;
+                let msgType = 'text';
+                let msgContent = null;
+
+                // Handle Tags
+                const quoteMatch = cleanResponse.match(/\[QUOTE:\s*(\d+)\]/);
+                if (quoteMatch) {
+                    aiQuoteId = quoteMatch[1];
+                    cleanResponse = cleanResponse.replace(quoteMatch[0], '').trim();
+                    aiQuoteContent = messages.find(m => m.id === aiQuoteId)?.content;
+                }
+
+                const recallMatch = cleanResponse.match(/\[RECALL:\s*(\d+)\]/);
+                if (recallMatch) {
+                    const rid = recallMatch[1];
+                    setMessages(prev => prev.map(m => m.id === rid ? { ...m, content: '对方撤回了一条消息', isWithdrawn: true } : m));
+                    cleanResponse = cleanResponse.replace(recallMatch[0], '').trim();
+                }
+
+                const deleteMatch = cleanResponse.match(/\[DELETE:\s*(\d+)\]/);
+                if (deleteMatch) {
+                    setMessages(prev => prev.filter(m => m.id !== deleteMatch[1]));
+                    cleanResponse = cleanResponse.replace(deleteMatch[0], '').trim();
+                }
+
+                const stickerMatch = cleanResponse.match(/\[STICKER:\s*(.*?)\]/);
+                if (stickerMatch) {
+                    msgType = 'sticker';
+                    msgContent = stickerMatch[1];
+                    cleanResponse = cleanResponse.replace(stickerMatch[0], '').trim();
+                }
+
+                const transferMatch = cleanResponse.match(/\[TRANSFER:\s*(\d+(?:\.\d+)?)\s*,\s*(.*?)\]/);
+                if (transferMatch) {
+                    msgType = 'transfer';
+                    msgContent = JSON.stringify({ amount: parseFloat(transferMatch[1]), note: transferMatch[2] });
+                    cleanResponse = cleanResponse.replace(transferMatch[0], '').trim();
+                }
+
+                if (cleanResponse || msgType !== 'text') {
+                    setMessages(prev => [...prev, {
+                        id: (Date.now()+1).toString(),
+                        role: 'assistant',
+                        content: msgContent || cleanResponse,
+                        type: msgType,
+                        timestamp: Date.now(),
+                        quoteContent: aiQuoteContent
+                    }]);
+                }
+            };
+
+            return (
+                <div className="flex flex-col h-full bg-[#EDEDED]">
+                    {view === 'chats' ? (
+                        <div className="flex flex-col h-full">
+                            <div className="h-22 bg-[#EDEDED] flex items-end justify-center pb-2 px-4 shrink-0 relative">
+                                <span className="font-semibold">微信</span>
+                                <Icon name="plus" size={24} className="absolute right-4 bottom-2" />
+                            </div>
+                            <div className="flex-1 bg-white overflow-y-auto">
+                                <div onClick={() => setView('detail')} className="flex p-3 gap-3 border-b active:bg-gray-100 cursor-pointer">
+                                    <div className="w-12 h-12 rounded-lg bg-pink-100 overflow-hidden shrink-0">
+                                        <img src={selectedAiPersona.avatar} className="w-full h-full object-cover" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="font-medium">{selectedAiPersona.name}</div>
+                                        <div className="text-sm text-gray-400 truncate">{messages[messages.length-1]?.content}</div>
+                                    </div>
+                                    <div className="text-[10px] text-gray-300">11:24</div>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col h-full">
+                             <div className="h-22 bg-[#EDEDED] flex items-end px-4 pb-2 shrink-0 relative">
+                                <Icon name="chevron-left" size={28} onClick={() => setView('chats')} className="cursor-pointer text-black" />
+                                <div className="flex-1 text-center font-semibold">{selectedAiPersona.name}</div>
+                                <Icon name="more-horizontal" size={24} className="text-black" />
+                            </div>
+                            <div ref={scrollRef} className="flex-1 p-3 overflow-y-auto flex flex-col gap-4 bg-[#EDEDED]">
+                                {messages.map(msg => (
+                                    msg.isWithdrawn || msg.type === 'system' ? (
+                                        <div key={msg.id} className="flex justify-center">
+                                            <span className="bg-gray-200/50 text-[11px] text-gray-400 px-3 py-0.5 rounded-sm">
+                                                {msg.isWithdrawn ? (msg.role === 'user' ? '你撤回了一条消息' : '对方撤回了一条消息') : msg.content}
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <div key={msg.id} className={`flex gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`} onDoubleClick={() => setQuotedId(msg.id)}>
+                                            <div className={`w-10 h-10 rounded-lg shrink-0 overflow-hidden ${msg.role === 'user' ? 'bg-blue-500' : 'bg-pink-100'}`}>
+                                                <img src={msg.role === 'user' ? 'https://picsum.photos/seed/user/100' : selectedAiPersona.avatar} className="w-full h-full object-cover" />
+                                            </div>
+                                            <div className={`max-w-[70%] flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                                                <div className={`px-3 py-2 rounded-lg text-[15px] relative ${msg.role === 'user' ? 'bg-[#95EC69]' : 'bg-white'}`} onContextMenu={(e) => { e.preventDefault(); navigator.clipboard.writeText(msg.content); alert('已复制'); }}>
+                                                    {msg.quoteContent && (
+                                                        <div className="text-[12px] text-gray-400 border-l-2 border-gray-300 pl-2 mb-1 py-0.5 opacity-80">
+                                                            {msg.quoteContent}
+                                                        </div>
+                                                    )}
+                                                    {msg.type === 'sticker' ? <img src={msg.content} className="w-24 h-24 object-contain" /> : 
+                                                     msg.type === 'transfer' ? <div className="p-2 bg-orange-500 text-white rounded">转账: ¥{JSON.parse(msg.content).amount}</div> :
+                                                     msg.content}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )
+                                ))}
+                                {isTyping && <div className="text-[10px] text-gray-400 pl-12">对方正在输入...</div>}
+                            </div>
+                            <div className="p-2 bg-[#F7F7F7] border-t flex flex-col gap-2">
+                                {quotedId && (
+                                    <div className="text-[10px] text-gray-400 px-2 flex justify-between">
+                                        <span>引用: {messages.find(m => m.id === quotedId)?.content}</span>
+                                        <span onClick={() => setQuotedId(null)}>✕</span>
+                                    </div>
+                                )}
+                                <div className="flex items-center gap-2">
+                                    <Icon name="mic" size={28} />
+                                    <input 
+                                        className="flex-1 h-9 bg-white rounded px-2 outline-none text-sm" 
+                                        value={inputValue}
+                                        onChange={e => setInputValue(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && handleSend()}
+                                    />
+                                    <Icon name="smile" size={28} />
+                                    {inputValue ? (
+                                        <button onClick={handleSend} className="bg-[#07C160] text-white px-3 py-1 rounded text-sm font-medium">发送</button>
+                                    ) : <Icon name="plus" size={28} />}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <div className="h-14 bg-[#F7F7F7] border-t flex items-center justify-around shrink-0 pb-1">
+                        <div onClick={() => setView('chats')} className={`flex flex-col items-center gap-0.5 ${view === 'chats' || view === 'detail' ? 'text-[#07C160]' : 'text-gray-400'}`}>
+                            <Icon name="message-square" size={24} />
+                            <span className="text-[10px]">微信</span>
+                        </div>
+                        <div className="flex flex-col items-center gap-0.5 text-gray-400">
+                            <Icon name="compass" size={24} />
+                            <span className="text-[10px]">发现</span>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- Main App ---
+        function Main() {
+            const [state, setState] = useState({
+                isLocked: true,
+                currentApp: null,
+                time: '09:41',
+                battery: 85,
+                wallpaper: 'https://images.unsplash.com/photo-1544063853-9a3d76e7769d?auto=format&fit=crop&q=80&w=750&h=1500',
+                apiConfig: {
+                    apiKey: localStorage.getItem('gemini_api_key') || '',
+                    baseUrl: '',
+                    model: 'gemini-3-flash-preview',
+                    temperature: 0.7,
+                    selectedCharacterId: 'char-1',
+                    characterGroups: [{
+                        id: 'g-1', name: '默认', personas: [{ id: 'char-1', name: '小芸 💕', description: '温柔女友' }]
+                    }]
+                },
+                userProfile: { selectedPersonaId: 'user-1' }
+            });
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    const now = new Date();
+                    setState(s => ({ ...s, time: `${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}` }));
+                }, 1000);
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="relative w-full h-full polka-dot">
+                    <StatusBar time={state.time} battery={state.battery} isDark={!state.isLocked && state.currentApp !== null} />
+                    
+                    <AnimatePresence mode="wait">
+                        {state.isLocked ? (
+                            <motion.div key="lock" exit={{ y: -760 }} className="absolute inset-0 z-[500]">
+                                <LockScreen 
+                                    onUnlock={() => setState(s => ({ ...s, isLocked: false }))} 
+                                    wallpaper={state.wallpaper} 
+                                    time={state.time} 
+                                    date="4月17日 星期五" 
+                                />
+                            </motion.div>
+                        ) : null}
+                    </AnimatePresence>
+
+                    {!state.isLocked && (
+                        <div className="absolute inset-0">
+                            <HomeScreen 
+                                onOpenApp={(app) => setState(s => ({ ...s, currentApp: app }))} 
+                                wallpaper={state.wallpaper} 
+                            />
+                        </div>
+                    )}
+
+                    <AnimatePresence>
+                        {state.currentApp === 'wechat' && (
+                            <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} className="absolute inset-0 z-[600]">
+                                <WeChat 
+                                    onClose={() => setState(s => ({ ...s, currentApp: null }))}
+                                    apiConfig={state.apiConfig}
+                                    userProfile={state.userProfile}
+                                />
+                            </motion.div>
+                        )}
+                        {state.currentApp === 'settings' && (
+                            <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} className="absolute inset-0 z-[600] bg-white p-8">
+                                <div className="flex items-center mb-8">
+                                    <Icon name="chevron-left" onClick={() => setState(s => ({ ...s, currentApp: null }))} />
+                                    <span className="ml-2 font-bold">设置</span>
+                                </div>
+                                <div className="space-y-4">
+                                    <div className="text-sm font-semibold">API KEY</div>
+                                    <input 
+                                        type="password" 
+                                        defaultValue={state.apiConfig.apiKey}
+                                        onBlur={(e) => {
+                                            localStorage.setItem('gemini_api_key', e.target.value);
+                                            setState(s => ({ ...s, apiConfig: { ...s.apiConfig, apiKey: e.target.value } }));
+                                        }}
+                                        className="w-full border rounded p-2 text-sm"
+                                        placeholder="输入 API Key"
+                                    />
+                                    <div className="text-[10px] text-gray-400">设置后自动保存</div>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
+                    <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-32 h-1 bg-black/20 rounded-full z-[1001] cursor-pointer" onClick={() => setState(s => ({ ...s, currentApp: null }))}></div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<Main />);
+    </script>
+</body>
+</html>
