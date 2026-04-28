@@ -125,6 +125,53 @@
         /* Animations */
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .animate-fade { animation: fadeIn 0.3s ease-out; }
+
+        /* Icon Frame Optimization */
+        .app-icon-container {
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            padding: 0;
+        }
+
+        /* Component Frame Optimization */
+        .component-1x1 {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border-radius: 1px;
+        }
+
+        .component-2x2 {
+            width: 64px;
+            height: 64px;
+            padding: 0;
+            border-radius: 2px;
+        }
+
+        .component-4x1 {
+            width: 256px;
+            height: 32px;
+            padding: 0;
+            border-radius: 1px;
+        }
+
+        .component-4x2 {
+            width: 256px;
+            height: 64px;
+            padding: 0;
+            border-radius: 2px;
+        }
+
+        .component-4x3 {
+            width: 256px;
+            height: 96px;
+            padding: 0;
+            border-radius: 2px;
+        }
     </style>
 </head>
 <body>
@@ -157,13 +204,13 @@
                 id: "char-1",
                 name: "小云 💕",
                 avatar: "https://picsum.photos/seed/xiaoyun/200/200",
-                description: "你是一个专业的APP测试助手，名字叫小云。你专业、简洁、高效，说话时无任何压迫感。你的任务是辅助用户测试系统功能并提供反馈。请以专业且平和的语气进行回复。"
+                description: "你是一个专业的APP测试助手，名字叫小云。你专业、简洁、高效，说话时无任何压迫感。你的任务是辅助用户测试系统功能并[...]
             },
             {
                 id: "char-2",
                 name: "严厉导师",
                 avatar: "https://picsum.photos/seed/mentor/200/200",
-                description: "你是一位刻薄且高度严厉的学术监督。你对知识要求极高，说话刻薄、直接，不苟言笑。你的目标是高压监督用户完成学术论文。"
+                description: "你是一位刻薄且高度严厉的学术监督。你对知识要求极高，说话刻薄、直接，不苟言笑。你的目标是高压监督用户完成学术论[...]
             }
         ];
 
@@ -207,7 +254,7 @@
                         <p className="text-sm line-clamp-2 mt-0.5">{notification.content}</p>
                     </div>
                 </div>
-                <div onClick={(e) => { e.stopPropagation(); onClose(); }} className="absolute -top-1 -right-1 w-5 h-5 bg-gray-500/50 rounded-full flex items-center justify-center text-white text-[10px]">×</div>
+                <div onClick={(e) => { e.stopPropagation(); onClose(); }} className="absolute -top-1 -right-1 w-5 h-5 bg-gray-500/50 rounded-full flex items-center justify-center text-white text-[...]
             </motion.div>
         );
 
@@ -400,13 +447,15 @@
                     </AnimatePresence>
 
                     {/* Desktop */}
-                    <div className="absolute inset-0 bg-cover bg-center pt-24 px-6 grid grid-cols-4 gap-6" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1516550893923-42d28e5677af?q=80&w=750)' }}>
+                    <div className="absolute inset-0 bg-cover bg-center pt-24 px-6 grid grid-cols-4 gap-6" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1516550893923-42d28e567[...]
+                        {/* WeChat App Icon - 36x36px with 2px padding (32px icon inside) */}
                         <div onClick={() => setCurrentApp('wechat')} className="flex flex-col items-center gap-1 cursor-pointer">
-                            <div className="w-14 h-14 wechat-green rounded-xl flex items-center justify-center text-white shadow-lg"><MessageSquare size={32} /></div>
+                            <div className="app-icon-container wechat-green shadow-lg"><MessageSquare size={32} color="white" /></div>
                             <span className="text-white text-[11px] font-medium shadow-sm">微信</span>
                         </div>
+                        {/* Settings App Icon - 36x36px with 2px padding */}
                         <div onClick={() => setCurrentApp('settings')} className="flex flex-col items-center gap-1 cursor-pointer">
-                            <div className="w-14 h-14 bg-gray-400 rounded-xl flex items-center justify-center text-white shadow-lg"><Plus size={32} /></div>
+                            <div className="app-icon-container bg-gray-400 shadow-lg"><Plus size={32} color="white" /></div>
                             <span className="text-white text-[11px] font-medium shadow-sm">设置</span>
                         </div>
                     </div>
